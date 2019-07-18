@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -11,7 +12,7 @@ namespace HttpClientTimeouts.Core
 {
     public class Processor
     {
-        private const int DegreeOfPrallelism = 50;
+        private const int DegreeOfPrallelism = 200;
         private readonly IExternalService _service;
         private Stopwatch _sw;
         public Processor(IExternalService service)
@@ -25,8 +26,10 @@ namespace HttpClientTimeouts.Core
 
             // Uncomment 1 at a time.
 
-            //1. with 50 parallels - finished in 88287
-            SemaphoreSlimSelect(100_000);
+            ForEachAsync(100_000);
+
+            ////1. with 50 parallels - finished in 88287
+            //SemaphoreSlimSelect(100_000);
 
             ////2. with 50 parallels - finished in 85095 
             //TransformBlockForEach(100_000);
@@ -44,6 +47,17 @@ namespace HttpClientTimeouts.Core
             //ForEach(100_000);
 
         }
+
+        private void ForEachAsync(int maxCount)
+        {
+            IEnumerable<int> arr = Enumerable.Range(1, maxCount);
+
+            ForEachAsync(arr, DegreeOfPrallelism, async i =>
+            {
+                await CallSendAsync(i);
+            });
+        }
+
 
         private void SemaphoreSlimSelect(int maxCount)
         {
@@ -73,9 +87,6 @@ namespace HttpClientTimeouts.Core
             {
                 await CallSendAsync(i);
                 return null;
-            }, new ExecutionDataflowBlockOptions
-            {
-                MaxDegreeOfParallelism = DegreeOfPrallelism
             });
 
             foreach (var i in arr)
@@ -119,6 +130,17 @@ namespace HttpClientTimeouts.Core
                         .Select(CallSendAsync))
                 .GetAwaiter()
                 .GetResult();
+        }
+
+        private static Task ForEachAsync<T>(IEnumerable<T> source, int dop, Func<T, Task> body)
+        {
+            return Task.WhenAll(
+                from partition in Partitioner.Create(source).GetPartitions(dop)
+                select Task.Run(async delegate {
+                    using (partition)
+                        while (partition.MoveNext())
+                            await body(partition.Current);
+                }));
         }
 
         private async Task CallSendAsync(int iteration)
