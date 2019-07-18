@@ -47,14 +47,21 @@ namespace HttpClientTimeouts.Core
 
         private void SemaphoreSlimSelect(int maxCount)
         {
-            var mutex = new SemaphoreSlim(DegreeOfPrallelism);
+            SemaphoreSlim mutex = new SemaphoreSlim(DegreeOfPrallelism);
             IEnumerable<int> arr = Enumerable.Range(1, maxCount);
             var tasks = arr.Select(async i =>
             {
                 await mutex.WaitAsync();
-                try { await CallSendAsync(i); }
-                finally { mutex.Release(); }
-            }).ToList();
+                try
+                {
+                    await CallSendAsync(i);
+                }
+                finally
+                {
+                    mutex.Release();
+                }
+            });
+
             Task.WhenAll(tasks).GetAwaiter().GetResult();
         }
 
@@ -62,10 +69,10 @@ namespace HttpClientTimeouts.Core
         {
             IEnumerable<int> arr = Enumerable.Range(1, maxCount);
 
-            TransformBlock<int, string> callSendAsyncBlock = new TransformBlock<int, string>(async i =>
+            TransformBlock<int, object> callSendAsyncBlock = new TransformBlock<int, object>(async i =>
             {
                 await CallSendAsync(i);
-                return "";
+                return null;
             }, new ExecutionDataflowBlockOptions
             {
                 MaxDegreeOfParallelism = DegreeOfPrallelism
